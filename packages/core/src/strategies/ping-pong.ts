@@ -73,15 +73,13 @@ const utils = {
 export type PingPongStrategyConfig = {
 	inToken?: {
 		initialOutAmount: bigint;
-		recentOutAmount: bigint;
+
 		token: TokenInfo;
-		profit: number;
 	};
 	outToken?: {
 		initialOutAmount: bigint;
-		recentOutAmount: bigint;
+
 		token: TokenInfo;
-		profit: number;
 	};
 	amount: number;
 	slippage: number;
@@ -178,11 +176,8 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 			initialOutAmount: BigInt(
 				this.config.amount * 10 ** this.config.tokensInfo[0].decimals
 			),
-			recentOutAmount: BigInt(
-				this.config.amount * 10 ** this.config.tokensInfo[0].decimals
-			),
+
 			token: this.config.tokensInfo[0],
-			profit: 0,
 		};
 
 		const amountOut = results.routes[0]?.amountOut;
@@ -202,9 +197,7 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 
 		this.config.outToken = {
 			initialOutAmount: amountOut,
-			recentOutAmount: amountOut,
 			token: this.config.tokensInfo[1],
-			profit: 0,
 		};
 		if (!this.config.inToken || !this.config.outToken) {
 			throw new Error("PingPongStrategy:init: not enough tokens provided");
@@ -442,6 +435,7 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 				runtimeId,
 				slippage: order.slippageBps || 50,
 			});
+
 			// get best route
 			if (!computedRoutes.success || !Array.isArray(computedRoutes.routes)) {
 				throw new Error("PingPongStrategy:run: no routes found");
@@ -453,10 +447,8 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 				throw new Error("PingPongStrategy:run: no routes found");
 			}
 
-			console.log("ping-pong:bestRoute", {
-				outAmount: bestRoute.amountOut,
-				inAmount: bestRoute.amountIn,
-			});
+			const outAmountInt = BigNumber(bestRoute.amountOut.toString());
+			const outAmount = toDecimal(outAmountInt, order.outTokenDecimals);
 
 			// get best route price
 
@@ -531,6 +523,52 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 				}
 			}
 
+			const inToken = this.config.tokensInfo?.find(
+				(token) => token.address === order.inTokenAddress
+			);
+			const outToken = this.config.tokensInfo?.find(
+				(token) => token.address === order.outTokenAddress
+			);
+
+			if (!inToken || !outToken) {
+				throw new Error(
+					"PingPongStrategy:run: tokenIn or tokenOut is undefined"
+				);
+			}
+
+			// TODO: refactor this
+			const initialOutAmount =
+				this.config.inToken?.token.address === outToken.address
+					? this.config.inToken?.initialOutAmount
+					: this.config.outToken?.token.address === outToken.address
+					? this.config.outToken?.initialOutAmount
+					: undefined;
+
+			if (!initialOutAmount) {
+				throw new Error("PingPongStrategy:run: initialOutAmount is undefined");
+			}
+
+			const previousFilledOrder = strategyFilledOrders.find(
+				(o) => o.direction === order.direction
+			);
+
+			const prevOutAmount =
+				previousFilledOrder?.outAmountInt ?? initialOutAmount;
+			const recentOutAmountInt = BigNumber(prevOutAmount.toString());
+
+			const recentOutAmount = toDecimal(
+				recentOutAmountInt,
+				order.outTokenDecimals
+			);
+
+			const expectedProfit = outAmount.minus(recentOutAmount);
+
+			const expectedProfitPercent = expectedProfit
+				.div(recentOutAmount)
+				.times(100);
+
+			bot.reportExpectedProfitPercent(expectedProfitPercent.toNumber());
+
 			if (shouldExecute.value) {
 				if (shouldExecute.reason === "forced-by-user") {
 					bot.store.setState((state) => {
@@ -541,46 +579,6 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 						"PingPongStrategy:run:shouldExecute user forced execution"
 					);
 				}
-
-				const inToken = this.config.tokensInfo?.find(
-					(token) => token.address === order.inTokenAddress
-				);
-				const outToken = this.config.tokensInfo?.find(
-					(token) => token.address === order.outTokenAddress
-				);
-
-				if (!inToken || !outToken) {
-					throw new Error(
-						"PingPongStrategy:run: tokenIn or tokenOut is undefined"
-					);
-				}
-
-				// TODO: refactor this
-				const initialOutAmount =
-					this.config.inToken?.token.address === outToken.address
-						? this.config.inToken?.initialOutAmount
-						: this.config.outToken?.token.address === outToken.address
-						? this.config.outToken?.initialOutAmount
-						: undefined;
-
-				if (!initialOutAmount) {
-					throw new Error(
-						"PingPongStrategy:run: initialOutAmount is undefined"
-					);
-				}
-
-				const previousFilledOrder = strategyFilledOrders.find(
-					(o) => o.direction === order.direction
-				);
-
-				const prevOutAmount =
-					previousFilledOrder?.outAmountInt ?? initialOutAmount;
-				const recentOutAmountInt = BigNumber(prevOutAmount.toString());
-
-				const recentOutAmount = toDecimal(
-					recentOutAmountInt,
-					order.outTokenDecimals
-				);
 
 				console.log("ping-pong:execute with params:", {
 					runtimeId,
