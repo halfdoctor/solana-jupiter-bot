@@ -288,8 +288,6 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 
 				const slippage = this.config.slippage;
 
-				// TODO: use priority fee if enabled
-
 				const previousBuyOrder = strategyFilledOrders.find(
 					(order) => order.direction === "buy"
 				);
@@ -301,13 +299,8 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 				// TODO: add compounding
 				const sizeInt: bigint | undefined =
 					direction === "buy"
-						? // A -> B so I need to return amount from config
-						  //   BigInt(
-						  // 		this.config.amount * 10 ** this.config.tokensInfo[0].decimals
-						  //   )
-						  toBigInt(this.config.amount, this.config.tokensInfo[0].decimals)
-						: // B -> A so I need to return amount from previous buy order
-						  previousBuyOrder?.outAmountInt;
+						? toBigInt(this.config.amount, this.config.tokensInfo[0].decimals)
+						: previousBuyOrder?.outAmountInt;
 
 				console.log("sizeInt", sizeInt);
 
@@ -419,8 +412,6 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 			if (!strategyOpenOrders[0]) {
 				throw new Error("PingPongStrategy:run: no open orders");
 			}
-
-			//  If there is an open order  [CheckPrice] I want to check current market price with parameters from open order
 
 			const order = strategyOpenOrders[0];
 
@@ -579,9 +570,14 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 					);
 				}
 
-				/**
-				 * Auto slippage
-				 */
+				/** REPORT PRIORITY FEE */
+				if (this.config.priorityFeeMicroLamports) {
+					bot.reportPriorityFeeMicroLamports(
+						this.config.priorityFeeMicroLamports
+					);
+				}
+
+				/** AUTO SLIPPAGE */
 				let customSlippageThreshold: bigint | undefined;
 
 				if (this.config.enableAutoSlippage) {
@@ -598,9 +594,7 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 					);
 				}
 
-				/**
-				 * Execute the order
-				 */
+				/** EXECUTE ORDER */
 				const result = await bot.aggregators[0].execute({
 					runtimeId,
 					amount: order.sizeInt,
