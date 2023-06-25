@@ -554,6 +554,7 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 
 			const prevOutAmount =
 				previousFilledOrder?.outAmountInt ?? initialOutAmount;
+
 			const recentOutAmountInt = BigNumber(prevOutAmount.toString());
 
 			const recentOutAmount = toDecimal(
@@ -580,16 +581,28 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 					);
 				}
 
-				console.log("ping-pong:execute with params:", {
-					runtimeId,
-					cause: shouldExecute.reason,
-					amount: order.sizeInt,
-					inToken: order.inTokenAddress,
-					outToken: order.outTokenAddress,
-					slippage: 50,
-					priorityFeeMicroLamports: this.config.priorityFeeMicroLamports,
-				});
+				/**
+				 * Auto slippage
+				 */
+				let customSlippageThreshold: bigint | undefined;
 
+				if (this.config.enableAutoSlippage) {
+					customSlippageThreshold = prevOutAmount;
+
+					bot.reportAutoSlippage(
+						recentOutAmount.toNumber(),
+						this.config.enableAutoSlippage
+					);
+
+					bot.logger.debug(
+						{ runtimeId },
+						`PingPongStrategy:run: customSlippageThreshold set to ${customSlippageThreshold}`
+					);
+				}
+
+				/**
+				 * Execute the order
+				 */
 				const result = await bot.aggregators[0].execute({
 					runtimeId,
 					amount: order.sizeInt,
@@ -611,10 +624,6 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 							);
 
 							const unrealizedProfit = outAmount.minus(recentOutAmount);
-							const unrealizedProfitInt = toInt(
-								unrealizedProfit,
-								outToken.decimals
-							);
 
 							return {
 								profit: "0",
