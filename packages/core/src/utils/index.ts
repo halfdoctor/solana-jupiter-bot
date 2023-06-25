@@ -11,3 +11,5 @@ export * from "./types";
 export * from "./thing-to-multi";
 export * from "./parse-error";
 export * from "./create-temp-dir";
+export * from "./to-bigint";
+export * from "./to-int";

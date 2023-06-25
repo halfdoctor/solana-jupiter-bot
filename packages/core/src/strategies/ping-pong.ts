@@ -1,5 +1,12 @@
 import { TokenInfo } from "src/types/token";
-import { createArray, parseError, thingToMulti } from "../utils";
+import {
+	createArray,
+	parseError,
+	thingToMulti,
+	toBigInt,
+	toDecimal,
+	toInt,
+} from "../utils";
 import { Strategy } from "src/types/strategy";
 import BigNumber from "bignumber.js";
 import { Order } from "src/types/global-state";
@@ -10,64 +17,6 @@ import { Order } from "src/types/global-state";
 type shouldExecute = {
 	value: boolean;
 	reason: "default" | "price-match" | "forced-by-user";
-};
-
-// utils
-const toInt = (
-	value: string | number | bigint | BigNumber,
-	decimals: number
-) => {
-	const v =
-		typeof value === "bigint" || typeof value === "number"
-			? BigNumber(value.toString())
-			: BigNumber(value);
-
-	const d = BigNumber(decimals);
-
-	if (!d.isInteger()) throw new Error(`Decimals ${decimals} is not an integer`);
-	if (!d.isPositive()) throw new Error(`Decimals ${decimals} is not positive`);
-	if (!d.isFinite()) throw new Error(`Decimals ${decimals} is not finite`);
-
-	const int = v.times(BigNumber(10).pow(decimals)).integerValue();
-
-	if (!int.isInteger())
-		throw new Error(
-			`Value ${value} cannot be converted to int with ${decimals} decimals, current result is ${int.toString()}`
-		);
-
-	return int;
-};
-
-const toDecimal = (
-	value: string | number | bigint | BigNumber,
-	decimals: number
-) => {
-	const v =
-		typeof value === "bigint" || typeof value === "number"
-			? BigNumber(value.toString())
-			: BigNumber(value);
-
-	const d = BigNumber(decimals);
-
-	if (!d.isInteger()) throw new Error(`Decimals ${decimals} is not an integer`);
-	if (!d.isPositive()) throw new Error(`Decimals ${decimals} is not positive`);
-	if (!d.isFinite()) throw new Error(`Decimals ${decimals} is not finite`);
-
-	const decimal = v.div(BigNumber(10).pow(decimals));
-
-	return decimal;
-};
-
-const toBigInt = (value: string | number | BigNumber, decimals: number) => {
-	const int = toInt(value, decimals);
-
-	return BigInt(int.toString());
-};
-
-const utils = {
-	toInt,
-	toDecimal,
-	toBigInt,
 };
 
 export type PingPongStrategyConfig = {
@@ -257,148 +206,16 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 				}
 			}
 
-			const recentFilledOrder = strategyFilledOrders.at(-1);
-
-			//  If there is no open order I want to place a new order
+			//  If there is no open order, place a new order
 			if (strategyOpenOrders.length === 0) {
-				console.log("No open orders, placing new order");
-
-				const direction =
-					recentFilledOrder?.direction === "buy" ? "sell" : "buy";
-				console.log("direction ", direction);
-
-				const inTokenAddress = market[direction === "buy" ? 0 : 1];
-				const outTokenAddress = market[direction === "buy" ? 1 : 0];
-
-				console.log("inTokenAddress", inTokenAddress);
-				console.log("outTokenAddress", outTokenAddress);
-
-				const inToken = this.config.tokensInfo?.find(
-					(token) => token.address === inTokenAddress
-				);
-				const outToken = this.config.tokensInfo?.find(
-					(token) => token.address === outTokenAddress
-				);
-
-				if (!inToken || !outToken) {
-					throw new Error(
-						"PingPongStrategy:run: tokenIn or tokenOut is undefined"
-					);
-				}
-
-				const slippage = this.config.slippage;
-
-				const previousBuyOrder = strategyFilledOrders.find(
-					(order) => order.direction === "buy"
-				);
-				console.log("previousBuyOrder", previousBuyOrder);
-				const previousSellOrder = strategyFilledOrders.find(
-					(order) => order.direction === "sell"
-				);
-
-				// TODO: add compounding
-				const sizeInt: bigint | undefined =
-					direction === "buy"
-						? toBigInt(this.config.amount, this.config.tokensInfo[0].decimals)
-						: previousBuyOrder?.outAmountInt;
-
-				console.log("sizeInt", sizeInt);
-
-				if (!sizeInt) {
-					throw new Error("PingPongStrategy:run: sizeInt is undefined");
-				}
-
-				let prevOutAmount =
-					direction === "buy"
-						? previousBuyOrder?.outAmountInt
-						: previousSellOrder?.outAmountInt;
-				console.log("prevOutAmount ", prevOutAmount);
-
-				if (!prevOutAmount && direction === "buy") {
-					// TODO: refactor this
-					const initialOutAmount = this.config.outToken?.initialOutAmount;
-
-					if (!initialOutAmount) {
-						throw new Error(
-							"PingPongStrategy:run: initialOutAmount is undefined"
-						);
-					}
-
-					console.log("initialOutAmount", initialOutAmount);
-
-					prevOutAmount = initialOutAmount;
-				} else if (!prevOutAmount && direction === "sell") {
-					const initialOutAmount = this.config.inToken?.initialOutAmount;
-
-					if (!initialOutAmount) {
-						throw new Error(
-							"PingPongStrategy:run: initialOutAmount is undefined"
-						);
-					}
-
-					console.log("initialOutAmount", initialOutAmount);
-
-					prevOutAmount = initialOutAmount;
-				}
-
-				if (!prevOutAmount) {
-					throw new Error("PingPongStrategy:run: prevOutAmount is undefined");
-				}
-
-				const recentOutAmount = BigNumber(prevOutAmount.toString());
-
-				console.log("prevOutAmount", prevOutAmount.toString());
-				console.log("recentOutAmount", recentOutAmount.toString());
-
-				// calculate what is desired price based on desired profit percent
-				const desiredProfitPercent =
-					this.config.executeAboveExpectedProfitPercent;
-
-				console.log("desiredProfitPercent", desiredProfitPercent);
-
-				// recent out amount + desired profit percent
-				const desiredOutAmount = recentOutAmount
-					.div(BigNumber(10 ** outToken.decimals))
-					.times(BigNumber(1 + desiredProfitPercent));
-
-				console.log("desiredOutAmount", desiredOutAmount.toString());
-
-				const desiredPrice = toInt(desiredOutAmount, outToken.decimals)
-					.div(BigNumber(sizeInt.toString()))
-					.div(BigNumber(10 ** (outToken.decimals - inToken.decimals)));
-
-				console.log("desiredPrice", desiredPrice.toString());
-
-				const invertedDesiredPrice = BigNumber(sizeInt.toString())
-					.div(desiredOutAmount.times(BigNumber(10 ** outToken.decimals)))
-					.div(BigNumber(10 ** (inToken.decimals - outToken.decimals)));
-
-				console.log("invertedDesiredPrice", invertedDesiredPrice.toString());
-
-				const order: Order = {
-					id: runtimeId,
+				const order = createOrder({
+					config: this.config,
+					market,
 					strategyId: this.id,
-					createdAt: Date.now(),
-					updatedAt: Date.now(),
-					direction,
-					type: "limit-like",
-					sizeInt: sizeInt,
-					size: BigNumber(sizeInt.toString())
-						.div(BigNumber(10 ** inToken.decimals))
-						.toString(),
-					inTokenAddress: inToken.address,
-					outTokenAddress: outToken.address,
-					inTokenSymbol: inToken.symbol || "n/a",
-					outTokenSymbol: outToken.symbol || "n/a",
-					inTokenDecimals: inToken.decimals,
-					outTokenDecimals: outToken.decimals,
-					price:
-						direction === "buy"
-							? invertedDesiredPrice.toString()
-							: desiredPrice.toString(),
-					desiredOutAmount: desiredOutAmount.toString(),
-					slippageBps: slippage,
-				};
+					runtimeId,
+					strategyFilledOrders,
+				});
+
 				// add new order to store
 				bot.store.setState((s) => {
 					s.orders.set(runtimeId, order);
@@ -671,4 +488,155 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 			done(this);
 		}
 	},
+};
+
+const createOrder = ({
+	config,
+	market,
+	strategyFilledOrders,
+	runtimeId,
+	strategyId,
+}: {
+	config: typeof PingPongStrategy.config;
+	market: string[];
+	strategyFilledOrders: Order[];
+	runtimeId: string;
+	strategyId: string;
+}) => {
+	if (!config.tokensInfo?.[0] || !config.tokensInfo[1]) {
+		throw new Error("PingPongStrategy:init: not enough tokens provided");
+	}
+
+	const recentFilledOrder = strategyFilledOrders.at(-1);
+
+	const direction = recentFilledOrder?.direction === "buy" ? "sell" : "buy";
+	console.log("direction ", direction);
+
+	const inTokenAddress = market[direction === "buy" ? 0 : 1];
+	const outTokenAddress = market[direction === "buy" ? 1 : 0];
+
+	console.log("inTokenAddress", inTokenAddress);
+	console.log("outTokenAddress", outTokenAddress);
+
+	const inToken = config.tokensInfo?.find(
+		(token) => token.address === inTokenAddress
+	);
+	const outToken = config.tokensInfo?.find(
+		(token) => token.address === outTokenAddress
+	);
+
+	if (!inToken || !outToken) {
+		throw new Error("PingPongStrategy:run: tokenIn or tokenOut is undefined");
+	}
+
+	const slippage = config.slippage;
+
+	const previousBuyOrder = strategyFilledOrders.find(
+		(order) => order.direction === "buy"
+	);
+	console.log("previousBuyOrder", previousBuyOrder);
+	const previousSellOrder = strategyFilledOrders.find(
+		(order) => order.direction === "sell"
+	);
+
+	// TODO: add compounding
+	const sizeInt: bigint | undefined =
+		direction === "buy"
+			? toBigInt(config.amount, config.tokensInfo[0].decimals)
+			: previousBuyOrder?.outAmountInt;
+
+	console.log("sizeInt", sizeInt);
+
+	if (!sizeInt) {
+		throw new Error("PingPongStrategy:run: sizeInt is undefined");
+	}
+
+	let prevOutAmount =
+		direction === "buy"
+			? previousBuyOrder?.outAmountInt
+			: previousSellOrder?.outAmountInt;
+	console.log("prevOutAmount ", prevOutAmount);
+
+	if (!prevOutAmount && direction === "buy") {
+		// TODO: refactor this
+		const initialOutAmount = config.outToken?.initialOutAmount;
+
+		if (!initialOutAmount) {
+			throw new Error("PingPongStrategy:run: initialOutAmount is undefined");
+		}
+
+		console.log("initialOutAmount", initialOutAmount);
+
+		prevOutAmount = initialOutAmount;
+	} else if (!prevOutAmount && direction === "sell") {
+		const initialOutAmount = config.inToken?.initialOutAmount;
+
+		if (!initialOutAmount) {
+			throw new Error("PingPongStrategy:run: initialOutAmount is undefined");
+		}
+
+		console.log("initialOutAmount", initialOutAmount);
+
+		prevOutAmount = initialOutAmount;
+	}
+
+	if (!prevOutAmount) {
+		throw new Error("PingPongStrategy:run: prevOutAmount is undefined");
+	}
+
+	const recentOutAmount = BigNumber(prevOutAmount.toString());
+
+	console.log("prevOutAmount", prevOutAmount.toString());
+	console.log("recentOutAmount", recentOutAmount.toString());
+
+	// calculate what is desired price based on desired profit percent
+	const desiredProfitPercent = config.executeAboveExpectedProfitPercent;
+
+	console.log("desiredProfitPercent", desiredProfitPercent);
+
+	// recent out amount + desired profit percent
+	const desiredOutAmount = recentOutAmount
+		.div(BigNumber(10 ** outToken.decimals))
+		.times(BigNumber(1 + desiredProfitPercent));
+
+	console.log("desiredOutAmount", desiredOutAmount.toString());
+
+	const desiredPrice = toInt(desiredOutAmount, outToken.decimals)
+		.div(BigNumber(sizeInt.toString()))
+		.div(BigNumber(10 ** (outToken.decimals - inToken.decimals)));
+
+	console.log("desiredPrice", desiredPrice.toString());
+
+	const invertedDesiredPrice = BigNumber(sizeInt.toString())
+		.div(desiredOutAmount.times(BigNumber(10 ** outToken.decimals)))
+		.div(BigNumber(10 ** (inToken.decimals - outToken.decimals)));
+
+	console.log("invertedDesiredPrice", invertedDesiredPrice.toString());
+
+	const order: Order = {
+		id: runtimeId,
+		strategyId,
+		createdAt: Date.now(),
+		updatedAt: Date.now(),
+		direction,
+		type: "limit-like",
+		sizeInt: sizeInt,
+		size: BigNumber(sizeInt.toString())
+			.div(BigNumber(10 ** inToken.decimals))
+			.toString(),
+		inTokenAddress: inToken.address,
+		outTokenAddress: outToken.address,
+		inTokenSymbol: inToken.symbol || "n/a",
+		outTokenSymbol: outToken.symbol || "n/a",
+		inTokenDecimals: inToken.decimals,
+		outTokenDecimals: outToken.decimals,
+		price:
+			direction === "buy"
+				? invertedDesiredPrice.toString()
+				: desiredPrice.toString(),
+		desiredOutAmount: desiredOutAmount.toString(),
+		slippageBps: slippage,
+	};
+
+	return order;
 };

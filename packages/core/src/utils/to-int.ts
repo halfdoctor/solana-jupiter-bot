@@ -1,6 +1,6 @@
 import BigNumber from "bignumber.js";
 
-export const toDecimal = (
+export const toInt = (
 	value: string | number | bigint | BigNumber,
 	decimals: number
 ) => {
@@ -15,7 +15,12 @@ export const toDecimal = (
 	if (!d.isPositive()) throw new Error(`Decimals ${decimals} is not positive`);
 	if (!d.isFinite()) throw new Error(`Decimals ${decimals} is not finite`);
 
-	const decimal = v.div(BigNumber(10).pow(decimals));
+	const int = v.times(BigNumber(10).pow(decimals)).integerValue();
 
-	return decimal;
+	if (!int.isInteger())
+		throw new Error(
+			`Value ${value} cannot be converted to int with ${decimals} decimals, current result is ${int.toString()}`
+		);
+
+	return int;
 };
