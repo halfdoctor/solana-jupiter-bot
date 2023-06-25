@@ -812,17 +812,19 @@ export const createAggregator = (
 					outAmount: outAmountMulti.number,
 					outUiAmount: outAmountMulti.uiValue.number,
 					slippage: slippage,
-					profit: calculatedProfits.profit?.number,
-					profitPercent: calculatedProfits.profitPercent,
-					unrealizedProfit: calculatedProfits.unrealizedProfit?.uiValue.number,
-					unrealizedProfitPercent: calculatedProfits.unrealizedProfitPercent,
+					profit: Number(calculatedProfits.profit),
+					profitPercent: Number(calculatedProfits.profitPercent),
+					unrealizedProfit: Number(calculatedProfits.unrealizedProfit),
+					unrealizedProfitPercent: Number(
+						calculatedProfits.unrealizedProfitPercent
+					),
 				};
 
 				store.setState((state) => {
 					// set current strategy info
 					state.strategies.current = {
 						...state.strategies.current,
-						profitPercent: calculatedProfits.profitPercent || 0,
+						profitPercent: Number(calculatedProfits.profitPercent) ?? 0,
 					};
 
 					// update trade history
@@ -850,7 +852,7 @@ export const createAggregator = (
 
 				return {
 					...result,
-					profitPercent: calculatedProfits.profitPercent,
+					profitPercent: Number(calculatedProfits.profitPercent),
 				};
 			}
 
