@@ -12,7 +12,6 @@ export type BotStatus =
 	| "strategy:finished"
 	| "strategy:stopLossExceeded"
 	| "strategy:shouldReset"
-	| "strategies:validating"
 	| "strategies:initializing"
 	| "strategies:initialized"
 	| "strategies:running"
