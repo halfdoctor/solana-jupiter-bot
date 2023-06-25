@@ -28,11 +28,11 @@ const toInt = (
 	if (!d.isPositive()) throw new Error(`Decimals ${decimals} is not positive`);
 	if (!d.isFinite()) throw new Error(`Decimals ${decimals} is not finite`);
 
-	const int = v.times(BigNumber(10).pow(decimals));
+	const int = v.times(BigNumber(10).pow(decimals)).integerValue();
 
 	if (!int.isInteger())
 		throw new Error(
-			`Value ${value} cannot be converted to int with ${decimals} decimals`
+			`Value ${value} cannot be converted to int with ${decimals} decimals, current result is ${int.toString()}`
 		);
 
 	return int;
