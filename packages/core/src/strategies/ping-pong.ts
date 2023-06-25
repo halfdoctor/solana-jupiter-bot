@@ -10,6 +10,7 @@ import {
 import { Strategy } from "src/types/strategy";
 import BigNumber from "bignumber.js";
 import { Order } from "src/types/global-state";
+import { Bot } from "src";
 
 // TODO: restore auto-reset!
 // TODO: restore stop-loss!
@@ -232,102 +233,12 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 
 			const order = strategyOpenOrders[0];
 
-			console.log("ping-pong:order", order);
-
-			const computedRoutes = await bot.aggregators[0].computeRoutes({
-				inToken: order.inTokenAddress,
-				outToken: order.outTokenAddress,
-				amount: order.sizeInt,
+			const { shouldExecute, outAmount } = await checkOrder({
 				runtimeId,
-				slippage: order.slippageBps || 50,
+				bot,
+				order,
+				config: this.config,
 			});
-
-			// get best route
-			if (!computedRoutes.success || !Array.isArray(computedRoutes.routes)) {
-				throw new Error("PingPongStrategy:run: no routes found");
-			}
-
-			const bestRoute = computedRoutes.routes[0];
-
-			if (!bestRoute) {
-				throw new Error("PingPongStrategy:run: no routes found");
-			}
-
-			const outAmountInt = BigNumber(bestRoute.amountOut.toString());
-			const outAmount = toDecimal(outAmountInt, order.outTokenDecimals);
-
-			// get best route price
-
-			const price =
-				order.direction === "buy"
-					? BigNumber(bestRoute.amountIn.toString())
-							.div(BigNumber(bestRoute.amountOut.toString()))
-							.div(
-								BigNumber(
-									10 ** (order.inTokenDecimals - order.outTokenDecimals)
-								)
-							)
-					: BigNumber(bestRoute.amountOut.toString())
-							.div(BigNumber(bestRoute.amountIn.toString()))
-							.div(
-								BigNumber(
-									10 ** (order.outTokenDecimals - order.inTokenDecimals)
-								)
-							);
-
-			if (!order.price) {
-				throw new Error("PingPongStrategy:run: error missing order price");
-			}
-
-			if (!order.desiredOutAmount) {
-				throw new Error(
-					"PingPongStrategy:run: error missing order desiredOutAmount"
-				);
-			}
-
-			console.log("ping-pong:price", {
-				price: price.toString(),
-				orderPrice: order.price,
-				outAmount: BigNumber(bestRoute.amountOut.toString()).div(
-					BigNumber(10 ** order.outTokenDecimals)
-				),
-
-				desiredOutAmount: order.desiredOutAmount,
-			});
-
-			let shouldExecute: shouldExecute = {
-				value: bot.store.getState().strategies.current.shouldExecute,
-				reason: bot.store.getState().strategies.current.shouldExecute
-					? "forced-by-user"
-					: "default",
-			};
-
-			console.log("ping-pong:shouldExecute initial value: ", shouldExecute);
-
-			if (order.direction === "buy") {
-				console.log("[BUY] check price vs order price", {
-					price: price.toString(),
-					orderPrice: order.price,
-				});
-				if (price.isLessThanOrEqualTo(BigNumber(order.price))) {
-					console.log("price is lower than the order, execute the order");
-					shouldExecute.value = true;
-					shouldExecute.reason = "price-match";
-				}
-			}
-
-			if (order.direction === "sell") {
-				console.log("[SELL] check price vs order price", {
-					price: price.toString(),
-					orderPrice: order.price,
-				});
-
-				if (price.isGreaterThanOrEqualTo(BigNumber(order.price))) {
-					console.log("price is higher than the order, execute the order");
-					shouldExecute.value = true;
-					shouldExecute.reason = "price-match";
-				}
-			}
 
 			const inToken = this.config.tokensInfo?.find(
 				(token) => token.address === order.inTokenAddress
@@ -639,4 +550,103 @@ const createOrder = ({
 	};
 
 	return order;
+};
+
+const checkOrder = async ({
+	runtimeId,
+	bot,
+	config,
+	order,
+}: {
+	runtimeId: string;
+	bot: Bot;
+	order: Order;
+	config: typeof PingPongStrategy.config;
+}) => {
+	const computedRoutes = await bot.aggregators[0].computeRoutes({
+		inToken: order.inTokenAddress,
+		outToken: order.outTokenAddress,
+		amount: order.sizeInt,
+		runtimeId,
+		slippage: order.slippageBps || 50,
+	});
+
+	// get best route
+	if (!computedRoutes.success || !Array.isArray(computedRoutes.routes)) {
+		throw new Error("PingPongStrategy:run: no routes found");
+	}
+
+	const bestRoute = computedRoutes.routes[0];
+
+	if (!bestRoute) {
+		throw new Error("PingPongStrategy:run: no routes found");
+	}
+
+	const outAmountInt = BigNumber(bestRoute.amountOut.toString());
+	const outAmount = toDecimal(outAmountInt, order.outTokenDecimals);
+
+	// get best route price
+
+	const price =
+		order.direction === "buy"
+			? BigNumber(bestRoute.amountIn.toString())
+					.div(BigNumber(bestRoute.amountOut.toString()))
+					.div(
+						BigNumber(10 ** (order.inTokenDecimals - order.outTokenDecimals))
+					)
+			: BigNumber(bestRoute.amountOut.toString())
+					.div(BigNumber(bestRoute.amountIn.toString()))
+					.div(
+						BigNumber(10 ** (order.outTokenDecimals - order.inTokenDecimals))
+					);
+
+	if (!order.price) {
+		throw new Error("PingPongStrategy:run: error missing order price");
+	}
+
+	if (!order.desiredOutAmount) {
+		throw new Error(
+			"PingPongStrategy:run: error missing order desiredOutAmount"
+		);
+	}
+
+	let shouldExecute: shouldExecute = {
+		value: bot.store.getState().strategies.current.shouldExecute,
+		reason: bot.store.getState().strategies.current.shouldExecute
+			? "forced-by-user"
+			: "default",
+	};
+
+	console.log("ping-pong:shouldExecute initial value: ", shouldExecute);
+
+	if (order.direction === "buy") {
+		console.log("[BUY] check price vs order price", {
+			price: price.toString(),
+			orderPrice: order.price,
+		});
+		if (price.isLessThanOrEqualTo(BigNumber(order.price))) {
+			console.log("price is lower than the order, execute the order");
+			shouldExecute.value = true;
+			shouldExecute.reason = "price-match";
+		}
+	}
+
+	if (order.direction === "sell") {
+		console.log("[SELL] check price vs order price", {
+			price: price.toString(),
+			orderPrice: order.price,
+		});
+
+		if (price.isGreaterThanOrEqualTo(BigNumber(order.price))) {
+			console.log("price is higher than the order, execute the order");
+			shouldExecute.value = true;
+			shouldExecute.reason = "price-match";
+		}
+	}
+
+	return {
+		shouldExecute,
+		outAmount,
+		price,
+	};
 };
