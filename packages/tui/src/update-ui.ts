@@ -9,6 +9,7 @@ import { TradeHistoryTable } from "./components/trade-history-table";
 import stripAnsi from "./lib/strip-ansi";
 import { AggregatorBox } from "./components/aggregator-box";
 import { version as coreVersion } from "@arb-protocol/core";
+import { OrdersTable } from "./components/orders-table";
 
 const CORE_VERSION = chalk.dim(coreVersion);
 
@@ -89,6 +90,7 @@ export const updateUI = (
 			ui.div("");
 			uiState.showPriceChart && ui.div(priceChart(state));
 			uiState.showExpectedProfitChart && ui.div(expectedProfitChart(state));
+			ui.div(OrdersTable(state));
 			ui.div(TradeHistoryTable(state));
 			ui.div(BottomBar);
 			break;
@@ -100,6 +102,7 @@ export const updateUI = (
 			ui.div("");
 			uiState.showPriceChart && ui.div(priceChart(state));
 			uiState.showExpectedProfitChart && ui.div(expectedProfitChart(state));
+			ui.div(OrdersTable(state));
 			ui.div(TradeHistoryTable(state));
 			ui.div(BottomBar);
 			break;

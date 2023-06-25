@@ -189,20 +189,22 @@ export type RuntimeAggregator = {
 			 * Reported profit is needed for the core but it is also available in the return of the `execute` method. So, you can use it in the strategy if you want.
 			 */
 			calculateProfit: ({
-				inAmount,
-				outAmount,
+				inAmountInt,
+				outAmountInt,
 				inToken,
 				outToken,
 			}: {
-				inAmount: Multi;
-				outAmount: Multi;
+				inAmountInt: bigint;
+				outAmountInt: bigint;
 				inToken: TokenInfo;
 				outToken: TokenInfo;
 			}) => {
-				profit?: Multi;
-				profitPercent?: number;
-				unrealizedProfit?: Multi;
-				unrealizedProfitPercent?: number;
+				profit?: string;
+				profitInt?: bigint;
+				profitPercent?: string;
+				unrealizedProfit?: string;
+				unrealizedProfitInt?: bigint;
+				unrealizedProfitPercent?: string;
 			};
 		},
 		{

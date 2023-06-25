@@ -1,7 +1,10 @@
 import create from "zustand/vanilla";
 import { subscribeWithSelector } from "zustand/middleware";
-import produce from "immer";
+import produce, { enableMapSet } from "immer";
 import { GlobalState } from "src/types/global-state";
+
+// enable Map and Set
+enableMapSet();
 
 export const createStore = <T>(initialState: T) => {
 	const store = create(subscribeWithSelector(() => initialState));

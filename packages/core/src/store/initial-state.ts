@@ -14,6 +14,7 @@ export const initialState: GlobalState = {
 	wallets: [],
 	// TODO: consider using Map
 	tradeHistory: {},
+	orders: new Map(),
 	strategies: {
 		current: {
 			shouldExecute: false,

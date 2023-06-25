@@ -83,26 +83,34 @@ export const start = async () => {
 			throw new Error("Missing amount in the config.json");
 		}
 
-		if (!config?.strategy?.slippage?.bps && !config?.strategy?.slippage?.enableAutoSlippage) {
+    if (
+      !config?.strategy?.slippage?.bps &&
+      !config?.strategy?.slippage?.enableAutoSlippage
+    ) {
 			throw new Error("Missing slippage in the config.json");
 		}
 
 		if (!(config?.strategy?.executeAboveExpectedProfitPercent >= 0)) {
-			throw new Error("Missing executeAboveExpectedProfitPercent in the config.json");
+      throw new Error(
+        "Missing executeAboveExpectedProfitPercent in the config.json"
+      );
 		}
 
 		PingPongStrategy.setConfig({
 			tokens: config.strategy.tokens as string[],
 			amount: config.strategy.amount,
 			slippage: config.strategy.slippage.bps || 5,
-			executeAboveExpectedProfitPercent: config.strategy.executeAboveExpectedProfitPercent,
+      executeAboveExpectedProfitPercent:
+        config.strategy.executeAboveExpectedProfitPercent,
 			priorityFeeMicroLamports: config.strategy.priorityFeeMicroLamports,
 			enableAutoSlippage: config.strategy.slippage.enableAutoSlippage,
 			enableCompounding: config.strategy.enableCompounding ?? false,
+      // enableExpectedProfitBasedStopLoss: true, TODO: restore this!
+      // profitBasedStopLossPercent: 0.1, TODO: restore this!
+      // onStopLossAction: "sell&reset",  TODO: restore this!
 			autoReset: config.strategy.autoReset,
 			expectedProfitBasedStopLoss: config.strategy.expectedProfitBasedStopLoss,
-			onStopLossAction: "sell&reset"
-			
+      onStopLossAction: "sell&reset",
 		});
 
 		const bot = extendBot(

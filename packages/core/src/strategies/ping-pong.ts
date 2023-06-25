@@ -1,18 +1,85 @@
 import { TokenInfo } from "src/types/token";
 import { createArray, parseError, thingToMulti } from "../utils";
-import Decimal from "decimal.js";
 import { Strategy } from "src/types/strategy";
+import BigNumber from "bignumber.js";
+import { Order } from "src/types/global-state";
+
+// TODO: restore auto-reset!
+// TODO: restore stop-loss!
+
+type shouldExecute = {
+	value: boolean;
+	reason: "default" | "price-match" | "forced-by-user";
+};
+
+// utils
+const toInt = (
+	value: string | number | bigint | BigNumber,
+	decimals: number
+) => {
+	const v =
+		typeof value === "bigint" || typeof value === "number"
+			? BigNumber(value.toString())
+			: BigNumber(value);
+
+	const d = BigNumber(decimals);
+
+	if (!d.isInteger()) throw new Error(`Decimals ${decimals} is not an integer`);
+	if (!d.isPositive()) throw new Error(`Decimals ${decimals} is not positive`);
+	if (!d.isFinite()) throw new Error(`Decimals ${decimals} is not finite`);
+
+	const int = v.times(BigNumber(10).pow(decimals));
+
+	if (!int.isInteger())
+		throw new Error(
+			`Value ${value} cannot be converted to int with ${decimals} decimals`
+		);
+
+	return int;
+};
+
+const toDecimal = (
+	value: string | number | bigint | BigNumber,
+	decimals: number
+) => {
+	const v =
+		typeof value === "bigint" || typeof value === "number"
+			? BigNumber(value.toString())
+			: BigNumber(value);
+
+	const d = BigNumber(decimals);
+
+	if (!d.isInteger()) throw new Error(`Decimals ${decimals} is not an integer`);
+	if (!d.isPositive()) throw new Error(`Decimals ${decimals} is not positive`);
+	if (!d.isFinite()) throw new Error(`Decimals ${decimals} is not finite`);
+
+	const decimal = v.div(BigNumber(10).pow(decimals));
+
+	return decimal;
+};
+
+const toBigInt = (value: string | number | BigNumber, decimals: number) => {
+	const int = toInt(value, decimals);
+
+	return BigInt(int.toString());
+};
+
+const utils = {
+	toInt,
+	toDecimal,
+	toBigInt,
+};
 
 export type PingPongStrategyConfig = {
 	inToken?: {
-		initialOutAmount: Decimal;
-		recentOutAmount: Decimal;
+		initialOutAmount: bigint;
+		recentOutAmount: bigint;
 		token: TokenInfo;
 		profit: number;
 	};
 	outToken?: {
-		initialOutAmount: Decimal;
-		recentOutAmount: Decimal;
+		initialOutAmount: bigint;
+		recentOutAmount: bigint;
 		token: TokenInfo;
 		profit: number;
 	};
@@ -34,20 +101,21 @@ export type PingPongStrategyConfig = {
 	expectedProfitBasedStopLoss?: {
 		enabled: boolean;
 		percent: number;
-	}
+	};
 	onStopLossAction?: "sell&reset" | "shutdown" | "sell&shutdown";
 	shouldReset?: boolean;
 	autoReset?: {
 		enabled: boolean;
 		timeWindowMs: number;
 	};
+	initialOutAmount?: bigint;
 };
 
 export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 	id: "ping-pong",
 	name: "Ping Pong",
 	description: "Ping Pong Strategy WOW",
-	version: "0.0.1",
+	version: "0.0.2",
 	config: {
 		amount: 0,
 		slippage: 50,
@@ -93,18 +161,26 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 		const results = await bot.aggregators[0].computeRoutes({
 			inToken: this.config.tokensInfo[0].address,
 			outToken: this.config.tokensInfo[1].address,
-			amount: initialTradeAmount.bigint,
-			slippage: 0.5,
+			amount: BigInt(
+				this.config.amount * 10 ** this.config.tokensInfo[0].decimals
+			),
+			slippage: 50,
 			runtimeId: "init",
 		});
 
 		if (!results.success) {
-			throw new Error("PingPongStrategy:init:error: " + results.error);
+			throw new Error(
+				"PingPongStrategy:init:error: " + JSON.stringify(results.error)
+			);
 		}
 
 		this.config.inToken = {
-			initialOutAmount: initialTradeAmount.uiValue.decimal,
-			recentOutAmount: initialTradeAmount.uiValue.decimal,
+			initialOutAmount: BigInt(
+				this.config.amount * 10 ** this.config.tokensInfo[0].decimals
+			),
+			recentOutAmount: BigInt(
+				this.config.amount * 10 ** this.config.tokensInfo[0].decimals
+			),
 			token: this.config.tokensInfo[0],
 			profit: 0,
 		};
@@ -125,8 +201,8 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 		}
 
 		this.config.outToken = {
-			initialOutAmount: outAmountAsDecimal,
-			recentOutAmount: outAmountAsDecimal,
+			initialOutAmount: amountOut,
+			recentOutAmount: amountOut,
 			token: this.config.tokensInfo[1],
 			profit: 0,
 		};
@@ -167,287 +243,296 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 		});
 	},
 	async run(runtimeId, bot, done) {
-		let isDone = false;
-
 		try {
-			// Checks
-			if (!this.config.tokensInfo) {
-				throw new Error("PingPongStrategy:run: tokensInfo not provided");
+			if (!this.config.tokensInfo?.[0] || !this.config.tokensInfo[1]) {
+				throw new Error("PingPongStrategy:init: not enough tokens provided");
 			}
 
-			if (
-				!this.config.inToken ||
-				!this.config.outToken ||
-				!this.config.tokensInfo[0] ||
-				!this.config.tokensInfo[1]
-			) {
-				throw new Error("PingPongStrategy:run: not enough tokens provided");
+			const market = [
+				this.config.tokensInfo[0].address,
+				this.config.tokensInfo[1].address,
+			];
+
+			let strategyOpenOrders: Order[] = [];
+			let strategyFilledOrders: Order[] = [];
+
+			for (const [_, order] of bot.store.getState().orders) {
+				if (order.strategyId === this.id) {
+					order.isExecuted
+						? strategyFilledOrders.push(order)
+						: strategyOpenOrders.push(order);
+				}
 			}
 
-			if (!this.config.amount) {
-				throw new Error("PingPongStrategy:run: tradeAmount not provided");
-			}
+			const recentFilledOrder = strategyFilledOrders.at(-1);
 
-			const initialToken = this.config.tokensInfo[0];
+			//  If there is no open order I want to place a new order
+			if (strategyOpenOrders.length === 0) {
+				console.log("No open orders, placing new order");
 
-			// check if lock is enabled
-			if (this.config.lock) {
-				bot.logger.info(
-					"PingPongStrategy:run: lock enabled - waiting for unlock"
+				const direction =
+					recentFilledOrder?.direction === "buy" ? "sell" : "buy";
+				console.log("direction ", direction);
+
+				const inTokenAddress = market[direction === "buy" ? 0 : 1];
+				const outTokenAddress = market[direction === "buy" ? 1 : 0];
+
+				console.log("inTokenAddress", inTokenAddress);
+				console.log("outTokenAddress", outTokenAddress);
+
+				const inToken = this.config.tokensInfo?.find(
+					(token) => token.address === inTokenAddress
+				);
+				const outToken = this.config.tokensInfo?.find(
+					(token) => token.address === outTokenAddress
 				);
 
-				let i = 0;
-				// wait for unlock
-				await new Promise((resolve) => {
-					setInterval(() => {
-						if (!this.config.lock) {
-							resolve(true);
-						}
-						bot.logger.info(
-							`PingPongStrategy:run: waiting for unlock ... ${i++}`
+				if (!inToken || !outToken) {
+					throw new Error(
+						"PingPongStrategy:run: tokenIn or tokenOut is undefined"
+					);
+				}
+
+				const slippage = 50; // TODO: use auto slippage if enabled
+
+				console.log("slippage", slippage);
+
+				// TODO: use priority fee if enabled
+
+				const previousBuyOrder = strategyFilledOrders.find(
+					(order) => order.direction === "buy"
+				);
+				console.log("previousBuyOrder", previousBuyOrder);
+				const previousSellOrder = strategyFilledOrders.find(
+					(order) => order.direction === "sell"
+				);
+
+				// TODO: add compounding
+				const sizeInt: bigint | undefined =
+					direction === "buy"
+						? // A -> B so I need to return amount from config
+						  //   BigInt(
+						  // 		this.config.amount * 10 ** this.config.tokensInfo[0].decimals
+						  //   )
+						  toBigInt(this.config.amount, this.config.tokensInfo[0].decimals)
+						: // B -> A so I need to return amount from previous buy order
+						  previousBuyOrder?.outAmountInt;
+
+				console.log("sizeInt", sizeInt);
+
+				if (!sizeInt) {
+					throw new Error("PingPongStrategy:run: sizeInt is undefined");
+				}
+
+				let prevOutAmount =
+					direction === "buy"
+						? previousBuyOrder?.outAmountInt
+						: previousSellOrder?.outAmountInt;
+				console.log("prevOutAmount ", prevOutAmount);
+
+				if (!prevOutAmount && direction === "buy") {
+					// TODO: refactor this
+					const initialOutAmount = this.config.outToken?.initialOutAmount;
+
+					if (!initialOutAmount) {
+						throw new Error(
+							"PingPongStrategy:run: initialOutAmount is undefined"
 						);
-					}, 1000);
+					}
+
+					console.log("initialOutAmount", initialOutAmount);
+
+					prevOutAmount = initialOutAmount;
+				} else if (!prevOutAmount && direction === "sell") {
+					const initialOutAmount = this.config.inToken?.initialOutAmount;
+
+					if (!initialOutAmount) {
+						throw new Error(
+							"PingPongStrategy:run: initialOutAmount is undefined"
+						);
+					}
+
+					console.log("initialOutAmount", initialOutAmount);
+
+					prevOutAmount = initialOutAmount;
+				}
+
+				if (!prevOutAmount) {
+					throw new Error("PingPongStrategy:run: prevOutAmount is undefined");
+				}
+
+				const recentOutAmount = BigNumber(prevOutAmount.toString());
+
+				console.log("prevOutAmount", prevOutAmount.toString());
+				console.log("recentOutAmount", recentOutAmount.toString());
+
+				// calculate what is desired price based on desired profit percent
+				const desiredProfitPercent =
+					this.config.executeAboveExpectedProfitPercent;
+
+				console.log("desiredProfitPercent", desiredProfitPercent);
+
+				// recent out amount + desired profit percent
+				const desiredOutAmount = recentOutAmount
+					.div(BigNumber(10 ** outToken.decimals))
+					.times(BigNumber(1 + desiredProfitPercent));
+
+				console.log("desiredOutAmount", desiredOutAmount.toString());
+
+				const desiredPrice = toInt(desiredOutAmount, outToken.decimals)
+					.div(BigNumber(sizeInt.toString()))
+					.div(BigNumber(10 ** (outToken.decimals - inToken.decimals)));
+
+				console.log("desiredPrice", desiredPrice.toString());
+
+				const invertedDesiredPrice = BigNumber(sizeInt.toString())
+					.div(desiredOutAmount.times(BigNumber(10 ** outToken.decimals)))
+					.div(BigNumber(10 ** (inToken.decimals - outToken.decimals)));
+
+				console.log("invertedDesiredPrice", invertedDesiredPrice.toString());
+
+				const order: Order = {
+					id: runtimeId,
+					strategyId: this.id,
+					createdAt: Date.now(),
+					updatedAt: Date.now(),
+					direction,
+					type: "limit-like",
+					sizeInt: sizeInt,
+					size: BigNumber(sizeInt.toString())
+						.div(BigNumber(10 ** inToken.decimals))
+						.toString(),
+					inTokenAddress: inToken.address,
+					outTokenAddress: outToken.address,
+					inTokenSymbol: inToken.symbol || "n/a",
+					outTokenSymbol: outToken.symbol || "n/a",
+					inTokenDecimals: inToken.decimals,
+					outTokenDecimals: outToken.decimals,
+					price:
+						direction === "buy"
+							? invertedDesiredPrice.toString()
+							: desiredPrice.toString(),
+					desiredOutAmount: desiredOutAmount.toString(),
+					slippageBps: slippage,
+				};
+				// add new order to store
+				bot.store.setState((s) => {
+					s.orders.set(runtimeId, order);
 				});
+
+				// update open orders
+				strategyOpenOrders.push(order);
 			}
 
-			// UI Hook
-			this.uiHook.value = this.config.enableCompounding ? "Compounding ON" : "";
-
-			const tradeAmount = thingToMulti.fromUiValue(
-				this.config.inToken.token.address === this.config.tokensInfo[0].address
-					? this.config.enableCompounding
-						? this.config.inToken.recentOutAmount
-						: this.config.amount
-					: this.config.inToken.recentOutAmount.toNumber(),
-				this.config.inToken.token.decimals
-			);
-
-			const slippage = this.config.slippage;
-
-			if (!tradeAmount) {
-				const msg = "PingPongStrategy:run:error tradeAmount not provided";
-				bot.logger.error(
-					{
-						amount: this.config.enableCompounding
-							? this.config.inToken.recentOutAmount
-							: this.config.amount,
-						inTokenRecentOutAmount: this.config.inToken.recentOutAmount,
-						typeOfInTokenRecentOutAmount:
-							typeof this.config.inToken.recentOutAmount,
-						inToken: this.config.inToken.token,
-						outToken: this.config.outToken.token,
-						enableCompounding: this.config.enableCompounding,
-					},
-					msg
-				);
-				throw new Error(msg);
+			// check again if there are any open orders
+			if (!strategyOpenOrders[0]) {
+				throw new Error("PingPongStrategy:run: no open orders");
 			}
 
-			// get routes
-			const start = performance.now();
+			//  If there is an open order  [CheckPrice] I want to check current market price with parameters from open order
 
-			const results = await bot.aggregators[0].computeRoutes({
-				inToken: this.config.inToken.token.address,
-				outToken: this.config.outToken.token.address,
-				amount: tradeAmount.bigint,
-				slippage,
+			const order = strategyOpenOrders[0];
+
+			console.log("ping-pong:order", order);
+
+			const computedRoutes = await bot.aggregators[0].computeRoutes({
+				inToken: order.inTokenAddress,
+				outToken: order.outTokenAddress,
+				amount: order.sizeInt,
 				runtimeId,
+				slippage: order.slippageBps || 50,
 			});
-
-			const end = performance.now();
-
-			bot.logger.debug(
-				{ runtimeId },
-				`PingPongStrategy:run: computeRoutes took ${end - start} milliseconds`
-			);
-			//FIXME:
-			isDone = true;
-
 			// get best route
-			if (!results.success || !Array.isArray(results.routes)) {
+			if (!computedRoutes.success || !Array.isArray(computedRoutes.routes)) {
 				throw new Error("PingPongStrategy:run: no routes found");
 			}
 
-			const bestRoute = results.routes[0];
+			const bestRoute = computedRoutes.routes[0];
 
 			if (!bestRoute) {
 				throw new Error("PingPongStrategy:run: no routes found");
 			}
 
-			const outAmountMulti = thingToMulti.fromBlockchainValue(
-				bestRoute.amountOut,
-				this.config.outToken.token.decimals
-			);
+			console.log("ping-pong:bestRoute", {
+				outAmount: bestRoute.amountOut,
+				inAmount: bestRoute.amountIn,
+			});
 
-			if (!outAmountMulti) {
-				const msg = "PingPongStrategy:run:error outAmountMulti undefined";
-				bot.logger.error(msg);
-				throw new Error(msg);
+			// get best route price
+
+			const price =
+				order.direction === "buy"
+					? BigNumber(bestRoute.amountIn.toString())
+							.div(BigNumber(bestRoute.amountOut.toString()))
+							.div(
+								BigNumber(
+									10 ** (order.inTokenDecimals - order.outTokenDecimals)
+								)
+							)
+					: BigNumber(bestRoute.amountOut.toString())
+							.div(BigNumber(bestRoute.amountIn.toString()))
+							.div(
+								BigNumber(
+									10 ** (order.outTokenDecimals - order.inTokenDecimals)
+								)
+							);
+
+			if (!order.price) {
+				throw new Error("PingPongStrategy:run: error missing order price");
 			}
 
-			/**
-			 * Check if route isn't outdated because during the time of computing routes
-			 * inToken or outToken could be already changed
-			 */
-			if (
-				bestRoute.inToken !== this.config.inToken?.token.address ||
-				bestRoute.outToken !== this.config.outToken?.token.address
-			) {
-				// prevent unexpected behavior
-				bot.logger.debug(
-					{ runtimeId },
-					"PingPongStrategy:run: done - route outdated"
+			if (!order.desiredOutAmount) {
+				throw new Error(
+					"PingPongStrategy:run: error missing order desiredOutAmount"
 				);
-
-				return done(this);
 			}
 
-			// reset recentOutAmount to current outAmount if it's 0
-			if (this.config.outToken.recentOutAmount.equals(0)) {
-				this.config.outToken.recentOutAmount = outAmountMulti.uiValue.decimal;
-			}
+			console.log("ping-pong:price", {
+				price: price.toString(),
+				orderPrice: order.price,
+				outAmount: BigNumber(bestRoute.amountOut.toString()).div(
+					BigNumber(10 ** order.outTokenDecimals)
+				),
 
-			if (this.config.shouldReset) {
-				this.config.shouldReset = false;
-				this.config.outToken.recentOutAmount = outAmountMulti.uiValue.decimal;
-			}
+				desiredOutAmount: order.desiredOutAmount,
+			});
 
-			// calculate change
-			const expectedProfitPercent = outAmountMulti.uiValue.decimal
-				.minus(this.config.outToken.recentOutAmount)
-				.div(
-					this.config.outToken.recentOutAmount.equals(new Decimal(0))
-						? new Decimal(1)
-						: this.config.outToken.recentOutAmount
-				)
-				.times(100);
+			let shouldExecute: shouldExecute = {
+				value: bot.store.getState().strategies.current.shouldExecute,
+				reason: bot.store.getState().strategies.current.shouldExecute
+					? "forced-by-user"
+					: "default",
+			};
 
-			const prevExpectedProfitPercent =
-				bot.store.getState().strategies.current.expectedProfitPercent;
+			console.log("ping-pong:shouldExecute initial value: ", shouldExecute);
 
-			const isSellSide =
-				this.config.outToken.token.address === initialToken.address;
-
-			if (
-				this.config.autoReset?.enabled &&
-				performance.now() - prevExpectedProfitPercent.positiveValueAtRel >
-					this.config.autoReset?.timeWindowMs &&
-				expectedProfitPercent.toNumber() < 0 &&
-				!isSellSide
-			) {
-				bot.logger.info(
-					{ runtimeId },
-					`PingPongStrategy:run: done - expectedProfitPercent < 0 for more than ${
-						this.config.autoReset.timeWindowMs / 1000
-					}s, resetting`
-				);
-				//reset
-				this.config.outToken.recentOutAmount = outAmountMulti.uiValue.decimal;
-				bot.reportExpectedProfitPercent(0);
-			} else {
-				bot.reportExpectedProfitPercent(expectedProfitPercent.toNumber());
-			}
-
-			bot.logger.debug(
-				{
-					tradeAmount: tradeAmount,
-					recentInAmount: this.config.inToken.recentOutAmount.toString(),
-					currentOutAmount: outAmountMulti.uiValue.decimal,
-					recentOutAmount: this.config.outToken.recentOutAmount,
-					expectedProfitPercent: expectedProfitPercent.toNumber(),
-					inToken: this.config.inToken.token.symbol,
-					outToken: this.config.outToken.token.symbol,
-					runtimeId,
-				},
-				`PingPongStrategy:run: expectedProfitPercent ${expectedProfitPercent.toNumber()}`
-			);
-
-			if (results.routes.length === 0 || !results.routes[0]) {
-				throw new Error("PingPongStrategy:run: no routes found");
-			}
-
-			let shouldExecute = bot.store.getState().strategies.current.shouldExecute;
-
-			/**
-			 * Profit based stop loss
-			 * If expected profit is lower than stop loss percent
-			 * then execute stop loss action
-			 */
-			if (
-				this.config.expectedProfitBasedStopLoss?.enabled &&
-				this.config.expectedProfitBasedStopLoss.percent &&
-				expectedProfitPercent.toNumber() <
-					Math.abs(this.config.expectedProfitBasedStopLoss.percent) * -1 &&
-				isSellSide
-			) {
-				bot.setStatus("strategy:stopLossExceeded");
-
-				if (this.config.onStopLossAction === "shutdown") {
-					const msg = `PingPongStrategy:run: profitBasedStopLossPercent ${this.config.expectedProfitBasedStopLoss?.percent} reached, shutting down bot`;
-					bot.logger.info({ runtimeId }, msg);
-					console.log("\n\n" + msg + "\n\n");
-					bot.setStatus("!shutdown");
-				}
-
-				if (this.config.onStopLossAction === "sell&shutdown") {
-					bot.logger.info(
-						{ runtimeId },
-						"PingPongStrategy:run: profitBasedStopLossPercent reached, selling current out token"
-					);
-					shouldExecute = true;
-
-					bot.store.subscribe(
-						(s) => s.status.value,
-						(status) => {
-							if (status === "history:successfulTx") {
-								bot.logger.info(
-									{ runtimeId },
-									"PingPongStrategy:run: profitBasedStopLossPercent reached, token sold successfully, shutting down bot"
-								);
-								bot.setStatus("!shutdown");
-							}
-						}
-					);
-				}
-
-				if (this.config.onStopLossAction === "sell&reset") {
-					bot.logger.info(
-						{ runtimeId },
-						"PingPongStrategy:run: profitBasedStopLossPercent reached, selling current out token, and resetting inToken recentOutAmount"
-					);
-
-					// reset recent out amount for inToken
-					this.config.inToken.recentOutAmount = new Decimal(0);
-
-					shouldExecute = true;
-
-					const unsubscribe = bot.store.subscribe(
-						(s) => s.status.value,
-						(status) => {
-							if (status === "history:successfulTx") {
-								if (!this.config.outToken || !this.config.inToken) {
-									throw new Error(
-										"PingPongStrategy:run: this.config.outToken undefined"
-									);
-								}
-
-								bot.logger.info(
-									{ runtimeId, outToken: this.config.outToken },
-									"PingPongStrategy:run: profitBasedStopLossPercent reached, token sold successfully"
-								);
-								unsubscribe();
-							}
-						}
-					);
+			if (order.direction === "buy") {
+				console.log("[BUY] check price vs order price", {
+					price: price.toString(),
+					orderPrice: order.price,
+				});
+				if (price.isLessThanOrEqualTo(BigNumber(order.price))) {
+					console.log("price is lower than the order, execute the order");
+					shouldExecute.value = true;
+					shouldExecute.reason = "price-match";
 				}
 			}
 
-			if (
-				expectedProfitPercent.toNumber() >
-					this.config.executeAboveExpectedProfitPercent ||
-				shouldExecute
-			) {
-				if (shouldExecute) {
+			if (order.direction === "sell") {
+				console.log("[SELL] check price vs order price", {
+					price: price.toString(),
+					orderPrice: order.price,
+				});
+
+				if (price.isGreaterThanOrEqualTo(BigNumber(order.price))) {
+					console.log("price is higher than the order, execute the order");
+					shouldExecute.value = true;
+					shouldExecute.reason = "price-match";
+				}
+			}
+
+			if (shouldExecute.value) {
+				if (shouldExecute.reason === "forced-by-user") {
 					bot.store.setState((state) => {
 						state.status.value = "execute:shouldExecute";
 					});
@@ -457,211 +542,125 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 					);
 				}
 
-				const previousOutAmount = this.config.outToken.recentOutAmount;
+				const inToken = this.config.tokensInfo?.find(
+					(token) => token.address === order.inTokenAddress
+				);
+				const outToken = this.config.tokensInfo?.find(
+					(token) => token.address === order.outTokenAddress
+				);
 
-				// report priority fee
-				if (this.config.priorityFeeMicroLamports) {
-					bot.reportPriorityFeeMicroLamports(
-						this.config.priorityFeeMicroLamports
+				if (!inToken || !outToken) {
+					throw new Error(
+						"PingPongStrategy:run: tokenIn or tokenOut is undefined"
 					);
 				}
 
-				// auto slippage
-				let customSlippageThreshold: bigint | undefined;
+				// TODO: refactor this
+				const initialOutAmount =
+					this.config.inToken?.token.address === outToken.address
+						? this.config.inToken?.initialOutAmount
+						: this.config.outToken?.token.address === outToken.address
+						? this.config.outToken?.initialOutAmount
+						: undefined;
 
-				if (this.config.enableAutoSlippage) {
-					const previousOutAmount = thingToMulti.fromUiValue(
-						this.config.outToken.recentOutAmount,
-						this.config.outToken.token.decimals
-					);
-
-					if (!previousOutAmount) {
-						const msg =
-							"PingPongStrategy:run:error previousOutAmount is undefined";
-						bot.logger.error(msg);
-						throw new Error(msg);
-					}
-					customSlippageThreshold = previousOutAmount.bigint;
-
-					bot.reportAutoSlippage(
-						previousOutAmount.number,
-						this.config.enableAutoSlippage
-					);
-
-					bot.logger.debug(
-						{ runtimeId },
-						`PingPongStrategy:run: customSlippageThreshold set to ${customSlippageThreshold}`
+				if (!initialOutAmount) {
+					throw new Error(
+						"PingPongStrategy:run: initialOutAmount is undefined"
 					);
 				}
 
-				// execute trade
+				const previousFilledOrder = strategyFilledOrders.find(
+					(o) => o.direction === order.direction
+				);
+
+				const prevOutAmount =
+					previousFilledOrder?.outAmountInt ?? initialOutAmount;
+				const recentOutAmountInt = BigNumber(prevOutAmount.toString());
+
+				const recentOutAmount = toDecimal(
+					recentOutAmountInt,
+					order.outTokenDecimals
+				);
+
+				console.log("ping-pong:execute with params:", {
+					runtimeId,
+					cause: shouldExecute.reason,
+					amount: order.sizeInt,
+					inToken: order.inTokenAddress,
+					outToken: order.outTokenAddress,
+					slippage: 50,
+					priorityFeeMicroLamports: this.config.priorityFeeMicroLamports,
+				});
+
 				const result = await bot.aggregators[0].execute({
 					runtimeId,
-					originalRoutes: results.originalRoutes,
-					inToken: this.config.inToken.token.address,
-					outToken: this.config.outToken.token.address,
-					amount: tradeAmount.bigint,
-					slippage:
-						shouldExecute && expectedProfitPercent.toNumber() < 0
-							? 1
-							: slippage,
+					amount: order.sizeInt,
+					inToken: order.inTokenAddress,
+					outToken: order.outTokenAddress,
+					slippage: 50,
 					priorityFeeMicroLamports: this.config.priorityFeeMicroLamports,
-					customSlippageThreshold,
-					calculateProfit: ({ outAmount, outToken }) => {
-						bot.logger.debug(
-							{
-								runtimeId,
-								initialTokenA: initialToken.address,
-								outTokenA: outToken.address,
-								outTokenSymbol: outToken.symbol,
-							},
-							"PingPongStrategy:run:calculateProfit: initialToken.address !== outToken.address"
-						);
+					calculateProfit({ outAmountInt, outToken }) {
+						const outAmount = toDecimal(outAmountInt, outToken.decimals);
 
-						if (initialToken.address !== outToken.address) {
-							const unrealizedProfitPercent = outAmount.uiValue.decimal
-								.minus(previousOutAmount)
-								.div(previousOutAmount)
+						if (order.direction === "buy") {
+							const unrealizedProfitPercent = outAmount
+								.minus(recentOutAmount)
+								.div(recentOutAmount)
 								.times(100);
 
 							bot.reportUnrealizedProfitPercent(
 								unrealizedProfitPercent.toNumber()
 							);
 
-							const unrealizedProfit =
-								outAmount.uiValue.decimal.minus(previousOutAmount);
-
-							const unrealizedProfitMulti = thingToMulti.fromUiValue(
+							const unrealizedProfit = outAmount.minus(recentOutAmount);
+							const unrealizedProfitInt = toInt(
 								unrealizedProfit,
 								outToken.decimals
 							);
 
-							const profit = thingToMulti.fromUiValue(0, 0);
-							bot.logger.debug(
-								{
-									profit: profit?.number,
-									unrealizedProfit,
-									previousOutAmount,
-								},
-								"PingPongStrategy:run:calculateProfit: profit and unrealizedProfit"
-							);
-
-							if (!profit || !unrealizedProfitMulti) {
-								const msg =
-									"PingPongStrategy:run:calculateProfit profit or unrealizedProfit is undefined";
-								bot.logger.error(msg);
-								throw new Error(msg);
-							}
-
 							return {
-								profit: profit,
-								profitPercent: 0,
-								unrealizedProfit: unrealizedProfitMulti,
-								unrealizedProfitPercent: unrealizedProfitPercent.toNumber(),
+								profit: "0",
+								profitInt: BigInt(0),
+								profitPercent: "0",
+								unrealizedProfit: unrealizedProfit.toString(),
+								unrealizedProfitInt: BigInt(unrealizedProfit.toString()),
+								unrealizedProfitPercent: unrealizedProfitPercent.toString(),
 							};
 						}
 
-						const profit = outAmount.uiValue.decimal.minus(previousOutAmount);
+						const profit = outAmount.minus(recentOutAmount);
 
-						const profitMulti = thingToMulti.fromUiValue(
-							profit,
-							outToken.decimals
-						);
-
-						const profitPercent = outAmount.uiValue.decimal
-							.minus(previousOutAmount)
-							.div(previousOutAmount)
-							.times(100);
+						const profitPercent = profit.div(recentOutAmount).times(100);
 
 						bot.reportUnrealizedProfitPercent(0);
 
-						bot.logger.debug(
-							{
-								profit,
-								previousOutAmount,
-								profitMulti: profitMulti?.number,
-							},
-							"PingPongStrategy:run:calculateProfit: profit"
-						);
-
 						return {
-							profit: profitMulti,
-							profitPercent: profitPercent.toNumber(),
-							unrealizedProfit: thingToMulti.fromUiValue(0, 0),
-							unrealizedProfitPercent: 0,
+							profit: profit.toString(),
+							profitInt: BigInt(profit.toString()),
+							profitPercent: profitPercent.toString(),
+							unrealizedProfit: "0",
+							unrealizedProfitInt: BigInt(0),
+							unrealizedProfitPercent: "0",
 						};
 					},
 				});
 
 				if (result.status === "success") {
-					if (!result.outAmount) {
-						const msg = "PingPongStrategy:run: result.outAmount is undefined";
-						bot.logger.error(msg);
-						throw new Error(msg);
-					}
-
-					const outAmountMulti = thingToMulti.fromBlockchainValue(
-						result.outAmount,
-						this.config.outToken.token.decimals
-					);
-
-					if (!outAmountMulti) {
-						const msg = "PingPongStrategy:run: outAmountMulti is undefined";
-						bot.logger.error(msg);
-						throw new Error(msg);
-					}
-
-					// report tx profit
-					this.config.outToken.recentOutAmount = outAmountMulti.uiValue.decimal;
-
-					// set lock
-					this.config.lock = true;
-					bot.logger.debug({ runtimeId }, "PingPongStrategy:run: locking");
-					// swap sides
-
-					const prevInToken = this.config.inToken;
-					const prevOutToken = this.config.outToken;
-
-					bot.logger.debug(
-						{ runtimeId },
-						"PingPongStrategy:run: swapping sides"
-					);
-
-					this.config.inToken = prevOutToken;
-					this.config.outToken = prevInToken;
-
-					// reset price chart
+					// set order as executed
 					bot.store.setState((state) => {
-						state.chart.price.values = createArray(
-							state.chart.price.values.length,
-							0
-						);
-						state.chart.price.updatedAtRel = performance.now();
+						state.orders.set(order.id, {
+							...order,
+							isExecuted: true,
+							executedAt: Date.now(),
+							outAmountInt: result.outAmount,
+						});
 					});
-
-					// reset lock
-					this.config.lock = false;
-					bot.logger.debug({ runtimeId }, "PingPongStrategy:run: unlocking");
 				}
-			}
-
-			bot.logger.debug(
-				{ runtimeId, lookupPerformance: results.meta.lookupPerformance },
-				`PingPongStrategy:run: done isDone? ${isDone}`
-			);
-
-			if (!isDone) {
-				console.error("PingPongStrategy:run: isDone is false");
-				// @ts-expect-error FIXME:
-				console.error(this?.runtime?.id);
-				bot.logger.error(
-					{ runtimeId },
-					"PingPongStrategy:run: isDone is false"
-				);
-				process.exit(1);
 			}
 		} catch (error) {
 			const parsedError = parseError(error);
+
+			console.log("error", parsedError);
 			bot.logger.error(
 				{
 					stack: parsedError?.stack,

@@ -791,8 +791,8 @@ export const createAggregator = (
 				}
 
 				const calculatedProfits = calculateProfit({
-					inAmount: inAmountMulti,
-					outAmount: outAmountMulti,
+					inAmountInt: inAmountMulti.bigint,
+					outAmountInt: outAmountMulti.bigint,
 					inToken: inTokenInfo,
 					outToken: outTokenInfo,
 				});

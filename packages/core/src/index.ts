@@ -7,7 +7,7 @@ setupUnhandledErrorHandlers();
 export type { GlobalStore } from "./store";
 export type { TradeHistoryEntry } from "./types/trade-history";
 export type { PublicBot as Bot } from "./bot/create-public-bot";
-export type { GlobalState } from "./types/global-state";
+export type { GlobalState, Order, OrderId } from "./types/global-state";
 export type { TokenInfo as Token } from "./types/token";
 export type {
 	Aggregator,

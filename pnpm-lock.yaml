@@ -111,6 +111,9 @@ importers:
       bigint-buffer:
         specifier: ^1.1.5
         version: 1.1.5
+      bignumber.js:
+        specifier: ^9.1.1
+        version: 9.1.1
       bs58:
         specifier: 5.0.0
         version: 5.0.0
@@ -1288,7 +1291,7 @@ packages:
       '@solana/spl-token': 0.1.8
       '@solana/web3.js': 1.69.0
       bigint-buffer: 1.1.5
-      bignumber.js: 9.1.0
+      bignumber.js: 9.1.1
       bn.js: 5.2.1
     transitivePeerDependencies:
       - bufferutil
@@ -2562,7 +2565,7 @@ packages:
       '@solana/buffer-layout': 4.0.1
       '@solana/web3.js': 1.69.0
       bigint-buffer: 1.1.5
-      bignumber.js: 9.1.0
+      bignumber.js: 9.1.1
     transitivePeerDependencies:
       - bufferutil
       - encoding
@@ -3724,6 +3727,10 @@ packages:
 
   /bignumber.js@9.1.0:
     resolution: {integrity: sha512-4LwHK4nfDOraBCtst+wOWIHbu1vhvAPJK8g8nROd4iuc3PSEjWif/qwbkh8jwCJz6yDBvtU4KPynETgrfh7y3A==}
+    dev: false
+
+  /bignumber.js@9.1.1:
+    resolution: {integrity: sha512-pHm4LsMJ6lzgNGVfZHjMoO8sdoRhOzOH4MLmY65Jg70bpxCKu5iOHNJyfF6OyvYw7t8Fpf35RuzUyqnQsj8Vig==}
     dev: false
 
   /binance-api-node@0.12.6:
@@ -5263,7 +5270,7 @@ packages:
     resolution: {integrity: sha512-/U4CYp1214Xrp3u3Fqr9yNynUrr5Le4y0SsJh2lMDDSbpwYSz3M2SMWQC+wqcx79cN8PQtHQIL8KnuY9M66fdg==}
     hasBin: true
     dependencies:
-      chalk: 4.1.2
+      chalk: 4.1.0
       commander: 5.1.0
       debug: 4.3.4
     transitivePeerDependencies:
@@ -6107,7 +6114,7 @@ packages:
   /json-bigint@1.0.0:
     resolution: {integrity: sha512-SiPv/8VpZuWbvLSMtTDU8hEfrZWg/mH/nV/b4o0CYbSxu1UIQPLdwKOCIyLQX+VIPO5vrLX3i8qtqFyhdPSUSQ==}
     dependencies:
-      bignumber.js: 9.1.0
+      bignumber.js: 9.1.1
     dev: false
 
   /json-buffer@3.0.0:
@@ -6933,7 +6940,7 @@ packages:
         optional: true
     dependencies:
       lilconfig: 2.1.0
-      ts-node: 10.9.1(@types/node@18.15.9)(typescript@5.0.2)
+      ts-node: 10.9.1(@types/node@18.14.6)(typescript@5.0.2)
       yaml: 1.10.2
     dev: true
 

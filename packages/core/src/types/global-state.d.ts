@@ -4,6 +4,34 @@ import { Multi } from "src/utils";
 import { TradeHistoryEntry } from "./trade-history";
 import { BotStatus } from "./bot-status";
 
+export type OrderId = string;
+
+export type Order = {
+	id: OrderId;
+	createdAt: number;
+	updatedAt: number;
+	expiresAt?: number;
+	isExpired?: boolean;
+	executedAt?: number;
+	isExecuted?: boolean;
+	direction: "buy" | "sell";
+	inTokenAddress: string;
+	inTokenSymbol: string;
+	inTokenDecimals: number;
+	outTokenAddress: string;
+	outTokenSymbol: string;
+	outTokenDecimals: number;
+	sizeInt: bigint;
+	size: string;
+	price?: string;
+	desiredOutAmount?: string;
+	outAmountInt?: bigint;
+	outAmount?: string;
+	type: "limit" | "market" | "limit-like";
+	slippageBps?: number;
+	strategyId: string;
+};
+
 interface ChartIndicators {
 	values: number[];
 	label: string;
@@ -21,6 +49,7 @@ export type GlobalState = {
 		updatedAt: number;
 	};
 	wallets: Wallet[];
+	orders: Map<OrderId, Order>;
 	strategies: {
 		// TODO: this needs to be more generic to support multiple strategies
 		current: {
