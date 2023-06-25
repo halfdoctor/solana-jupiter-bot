@@ -286,9 +286,7 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 					);
 				}
 
-				const slippage = 50; // TODO: use auto slippage if enabled
-
-				console.log("slippage", slippage);
+				const slippage = this.config.slippage;
 
 				// TODO: use priority fee if enabled
 
@@ -608,7 +606,7 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 					amount: order.sizeInt,
 					inToken: order.inTokenAddress,
 					outToken: order.outTokenAddress,
-					slippage: 50,
+					slippage: order.slippageBps ?? 100,
 					priorityFeeMicroLamports: this.config.priorityFeeMicroLamports,
 					calculateProfit({ outAmountInt, outToken }) {
 						const outAmount = toDecimal(outAmountInt, outToken.decimals);
