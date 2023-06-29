@@ -269,10 +269,10 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 				(o) => o.direction === order.direction
 			);
 
-			const prevOutAmount =
+			const prevOutAmountInt =
 				previousFilledOrder?.outAmountInt ?? initialOutAmount;
 
-			const recentOutAmountInt = BigNumber(prevOutAmount.toString());
+			const recentOutAmountInt = BigNumber(prevOutAmountInt.toString());
 
 			const recentOutAmount = toDecimal(
 				recentOutAmountInt,
@@ -309,7 +309,7 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 				let customSlippageThreshold: bigint | undefined;
 
 				if (this.config.enableAutoSlippage) {
-					customSlippageThreshold = prevOutAmount;
+					customSlippageThreshold = prevOutAmountInt;
 
 					bot.reportAutoSlippage(
 						recentOutAmount.toNumber(),
@@ -350,7 +350,10 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 								profitInt: BigInt(0),
 								profitPercent: "0",
 								unrealizedProfit: unrealizedProfit.toString(),
-								unrealizedProfitInt: BigInt(unrealizedProfit.toString()),
+								unrealizedProfitInt: toBigInt(
+									unrealizedProfit,
+									outToken.decimals
+								),
 								unrealizedProfitPercent: unrealizedProfitPercent.toString(),
 							};
 						}
@@ -363,7 +366,7 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 
 						return {
 							profit: profit.toString(),
-							profitInt: BigInt(profit.toString()),
+							profitInt: toBigInt(profit, outToken.decimals),
 							profitPercent: profitPercent.toString(),
 							unrealizedProfit: "0",
 							unrealizedProfitInt: BigInt(0),
@@ -387,7 +390,6 @@ export const PingPongStrategy: Strategy<PingPongStrategyConfig> = {
 		} catch (error) {
 			const parsedError = parseError(error);
 
-			console.log("error", parsedError);
 			bot.logger.error(
 				{
 					stack: parsedError?.stack,
@@ -421,13 +423,9 @@ const createOrder = ({
 	const recentFilledOrder = strategyFilledOrders.at(-1);
 
 	const direction = recentFilledOrder?.direction === "buy" ? "sell" : "buy";
-	console.log("direction ", direction);
 
 	const inTokenAddress = market[direction === "buy" ? 0 : 1];
 	const outTokenAddress = market[direction === "buy" ? 1 : 0];
-
-	console.log("inTokenAddress", inTokenAddress);
-	console.log("outTokenAddress", outTokenAddress);
 
 	const inToken = config.tokensInfo?.find(
 		(token) => token.address === inTokenAddress
@@ -445,7 +443,7 @@ const createOrder = ({
 	const previousBuyOrder = strategyFilledOrders.find(
 		(order) => order.direction === "buy"
 	);
-	console.log("previousBuyOrder", previousBuyOrder);
+
 	const previousSellOrder = strategyFilledOrders.find(
 		(order) => order.direction === "sell"
 	);
@@ -456,8 +454,6 @@ const createOrder = ({
 			? toBigInt(config.amount, config.tokensInfo[0].decimals)
 			: previousBuyOrder?.outAmountInt;
 
-	console.log("sizeInt", sizeInt);
-
 	if (!sizeInt) {
 		throw new Error("PingPongStrategy:run: sizeInt is undefined");
 	}
@@ -466,7 +462,6 @@ const createOrder = ({
 		direction === "buy"
 			? previousBuyOrder?.outAmountInt
 			: previousSellOrder?.outAmountInt;
-	console.log("prevOutAmount ", prevOutAmount);
 
 	if (!prevOutAmount && direction === "buy") {
 		// TODO: refactor this
@@ -476,8 +471,6 @@ const createOrder = ({
 			throw new Error("PingPongStrategy:run: initialOutAmount is undefined");
 		}
 
-		console.log("initialOutAmount", initialOutAmount);
-
 		prevOutAmount = initialOutAmount;
 	} else if (!prevOutAmount && direction === "sell") {
 		const initialOutAmount = config.inToken?.initialOutAmount;
@@ -486,8 +479,6 @@ const createOrder = ({
 			throw new Error("PingPongStrategy:run: initialOutAmount is undefined");
 		}
 
-		console.log("initialOutAmount", initialOutAmount);
-
 		prevOutAmount = initialOutAmount;
 	}
 
@@ -495,34 +486,26 @@ const createOrder = ({
 		throw new Error("PingPongStrategy:run: prevOutAmount is undefined");
 	}
 
-	const recentOutAmount = BigNumber(prevOutAmount.toString());
-
-	console.log("prevOutAmount", prevOutAmount.toString());
-	console.log("recentOutAmount", recentOutAmount.toString());
+	const recentOutAmountInt = BigNumber(prevOutAmount.toString());
+	const recentOutAmount = toDecimal(recentOutAmountInt, outToken.decimals);
 
 	// calculate what is desired price based on desired profit percent
-	const desiredProfitPercent = config.executeAboveExpectedProfitPercent;
-
-	console.log("desiredProfitPercent", desiredProfitPercent);
+	const desiredProfitPercent = BigNumber(
+		config.executeAboveExpectedProfitPercent
+	).div(100);
 
 	// recent out amount + desired profit percent
-	const desiredOutAmount = recentOutAmount
-		.div(BigNumber(10 ** outToken.decimals))
-		.times(BigNumber(1 + desiredProfitPercent));
-
-	console.log("desiredOutAmount", desiredOutAmount.toString());
+	const desiredOutAmount = recentOutAmount.times(
+		BigNumber(1).plus(desiredProfitPercent)
+	);
 
 	const desiredPrice = toInt(desiredOutAmount, outToken.decimals)
 		.div(BigNumber(sizeInt.toString()))
 		.div(BigNumber(10 ** (outToken.decimals - inToken.decimals)));
 
-	console.log("desiredPrice", desiredPrice.toString());
-
 	const invertedDesiredPrice = BigNumber(sizeInt.toString())
 		.div(desiredOutAmount.times(BigNumber(10 ** outToken.decimals)))
 		.div(BigNumber(10 ** (inToken.decimals - outToken.decimals)));
-
-	console.log("invertedDesiredPrice", invertedDesiredPrice.toString());
 
 	const order: Order = {
 		id: runtimeId,
@@ -555,7 +538,6 @@ const createOrder = ({
 const checkOrder = async ({
 	runtimeId,
 	bot,
-	config,
 	order,
 }: {
 	runtimeId: string;
@@ -617,15 +599,12 @@ const checkOrder = async ({
 			: "default",
 	};
 
-	console.log("ping-pong:shouldExecute initial value: ", shouldExecute);
-
 	if (order.direction === "buy") {
 		console.log("[BUY] check price vs order price", {
 			price: price.toString(),
 			orderPrice: order.price,
 		});
 		if (price.isLessThanOrEqualTo(BigNumber(order.price))) {
-			console.log("price is lower than the order, execute the order");
 			shouldExecute.value = true;
 			shouldExecute.reason = "price-match";
 		}
@@ -638,7 +617,6 @@ const checkOrder = async ({
 		});
 
 		if (price.isGreaterThanOrEqualTo(BigNumber(order.price))) {
-			console.log("price is higher than the order, execute the order");
 			shouldExecute.value = true;
 			shouldExecute.reason = "price-match";
 		}
