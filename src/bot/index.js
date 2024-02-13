@@ -202,7 +202,7 @@ const pingpongStrategy = async (jupiter, tokenA, tokenB) => {
 					outAmount: tx.outputAmount || 0,
 					profit,
 					performanceOfTx,
-					error: tx.error?.message || null,
+					error: tx.error?.code === 6001 ? "Slippage Tolerance Exceeded" : tx.error?.message || null,
 				};
 
 				var waittime = await waitabit(100);

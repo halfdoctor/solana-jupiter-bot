@@ -147,7 +147,7 @@ const successSwapHandler = async (tx, tradeEntry, tokenA, tokenB) => {
 				var txresult = [];
 				var err2 = -1;
 				var rcount = 0;
-				var retries = 30;
+				var retries = 2;
 
 				const fetcher = async (retry) => {
 

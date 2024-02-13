@@ -379,7 +379,7 @@ function printToConsole({
 				ui.div(" ");
 
 				if (cache?.tradeHistory?.length > 0) {
-					const tableData = [...cache.tradeHistory].slice(-5);
+					const tableData = [...cache.tradeHistory].slice(-3);
 					tableData.map((entry) =>
 						ui.div(
 							{ text: `${entry.date}`, border: true },
