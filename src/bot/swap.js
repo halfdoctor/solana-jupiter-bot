@@ -22,7 +22,7 @@ const swap = async (jupiter, route) => {
 		if (process.env.DEBUG) storeItInTempAsJSON("routeInfoBeforeSwap", route);
 
 		  // pull the trade priority
-		  const priority = typeof cache.config.priority === "number" ? cache.config.priority : 123; //123 default if not set
+		  const priority = typeof cache.config.priority === "number" ? cache.config.priority : 100; //100 BPS default if not set
 		  cache.priority = priority;
 
 		const { execute } = await jupiter.exchange({
@@ -34,7 +34,7 @@ const swap = async (jupiter, route) => {
 		if (process.env.DEBUG) storeItInTempAsJSON("result", result);
 
 		// Reset counter on success
-		cache.tradeCounter.Failedbalancecheck = 0;
+		cache.tradeCounter.failedbalancecheck = 0;
 		cache.tradeCounter.errorcount = 0;
 
 		const performanceOfTx = performance.now() - performanceOfTxStart;
@@ -47,36 +47,32 @@ const swap = async (jupiter, route) => {
 exports.swap = swap;
 
 const failedSwapHandler = async(tradeEntry, inputToken, tradeAmount) => {
-	// update counter
+	// update trade counter
 	cache.tradeCounter[cache.sideBuy ? "buy" : "sell"].fail++;
 
-	// update trade history
-	cache.config.storeFailedTxInHistory;
+	// Update trade history if configured
+	if (cache.config.storeFailedTxInHistory) {
+		cache.tradeHistory.push(tradeEntry);
+	}
 
-	// update trade history
-	let tempHistory = cache.tradeHistory;
-	tempHistory.push(tradeEntry);
-	cache.tradeHistory = tempHistory;
+	// Double check the balance
+	const realbalanceToken = await balanceCheck(inputToken);
 
-	// Double check the balance is not the issue here. If so end the script to stop endless failed trans
-	var realbalanceToken = await balanceCheck( inputToken );
+	// If balance is insufficient, handle it
+	if (Number(realbalanceToken) < Number(tradeAmount)) {
+		cache.tradeCounter.failedbalancecheck++;
 
-	if (realbalanceToken<tradeAmount){
-		cache.tradeCounter.Failedbalancecheck++;
-
-		if (cache.tradeCounter.Failedbalancecheck>3){
-			// Has to fail for 3 times before it ends the script. This is to cover cases where there is a delay in account updating pull
-			console.log('Balance Lookup is too low for token: '+realbalanceToken+' < '+tradeAmount);
-			console.log('Failed For: '+cache.tradeCounter.Failedbalancecheck+' times');
+		if (cache.tradeCounter.failedbalancecheck > 5) {
+			console.log(`Balance Lookup is too low for token: ${realbalanceToken} < ${tradeAmount}`);
+			console.log(`Failed For: ${cache.tradeCounter.failedbalancecheck} times`);
 			process.exit();
 		}
 	}
 
-	// Add one count to the error
+	// Increment error count and check if too high
 	cache.tradeCounter.errorcount += 1;
-
-	if (cache.tradeCounter.errorcount>100){
-		console.log('Error Count is too high for swaps: '+cache.tradeCounter.errorcount);
+	if (cache.tradeCounter.errorcount > 100) {
+		console.log(`Error Count is too high for swaps: ${cache.tradeCounter.errorcount}`);
 		console.log('Ending to stop endless transactions failing');
 		process.exit();
 	}

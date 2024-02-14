@@ -8,7 +8,8 @@ cache.config = loadConfigFile({ showSpinner: true });
 
 // Adding a backup option for the transaction lookup
 // This is only needed for some RPCS that are not 
-// working up to speed.
+// working or are behind at the time of lookup.
+const rpc_main = cache.config.rpc[0];
 const rpc_backup = 'https://api.mainnet-beta.solana.com';
 
 // Key variables
@@ -31,7 +32,7 @@ const waitabit = async (ms) => {
 };
 
 // Main RPC
-const connection = new Connection(cache.config.rpc[0], {
+const connection = new Connection(rpc_main, {
     disableRetryOnRateLimit: true,
     commitment: 'confirmed',
 });
@@ -83,6 +84,11 @@ const checktrans = async (txid,wallet_address) => {
                 transstatus = 1;
             }
 
+            // Check if postTokenBalances is null or empty
+            if (!transresp.meta.postTokenBalances || transresp.meta.postTokenBalances.length === 0) {
+                return [null, WAIT_ERROR_CODE];
+            }
+
             var tokenamt=0;
             var tokendec=0;
 
@@ -121,7 +127,7 @@ const checktrans = async (txid,wallet_address) => {
             // Post Token Handling
             for (token of transresp.meta.postTokenBalances){
                 if (token.owner==wallet_address){
-                    if (transaction_changes[token.mint].start) {
+                    if (transaction_changes[token.mint]?.start) {
                         // Case where token account existed already
                         diff = Number(token.uiTokenAmount.amount)-Number(transaction_changes[token.mint].start);
                         diffdec = toDecimal(diff,transaction_changes[token.mint].decimals);
